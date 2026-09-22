@@ -9,7 +9,8 @@ const F = {
   modelo: "ufCrm45_1789994407",
   vencimento: "ufCrm45_1789995511",
   localizacao: "ufCrm45_1789999303",
-  hidro: "ufCrm45_1789999332"
+  hidro: "ufCrm45_1789999332",
+  item: "ufCrm45_1790105444"
 };
 
 function webhookUrl() {
@@ -125,7 +126,7 @@ async function listAllItems() {
     const params = {
       entityTypeId: ENTITY_TYPE_ID,
       filter: { categoryId: CATEGORY_ID },
-      select: ["id", "title", F.filial, F.modelo, F.vencimento, F.localizacao, F.hidro],
+      select: ["id", "title", F.filial, F.modelo, F.vencimento, F.localizacao, F.hidro, F.item],
       order: { id: "ASC" }
     };
     if (start >= 0) params.start = start;
@@ -157,6 +158,7 @@ function buildReport(items, enums) {
   for (const item of items) {
     const filialId = String(rawValue(item[F.filial]) || "");
     const modeloId = String(rawValue(item[F.modelo]) || "");
+    const itemCodigo = String(rawValue(item[F.item]) || "").trim();
     const filial = enums.filial.byId[filialId] || filialId || "Sem filial";
     const modelo = enums.modelo.byId[modeloId] || modeloId || "Modelo não informado";
     const vencDays = daysUntil(item[F.vencimento]);
@@ -167,6 +169,7 @@ function buildReport(items, enums) {
         id: item.id,
         filial,
         modelo,
+        itemCodigo,
         vencimento: item[F.vencimento],
         vencDays
       });
@@ -215,6 +218,7 @@ function buildReport(items, enums) {
         modelGroups.set(alert.modelo, {
           quantity: 0,
           dates: new Set(),
+          items: new Set(),
           minDays: Infinity,
           maxDays: -Infinity
         });
@@ -223,6 +227,7 @@ function buildReport(items, enums) {
       const model = modelGroups.get(alert.modelo);
       model.quantity += 1;
       model.dates.add(dateBR(alert.vencimento));
+      model.items.add(alert.itemCodigo);
       if (alert.vencDays != null) {
         model.minDays = Math.min(model.minDays, alert.vencDays);
         model.maxDays = Math.max(model.maxDays, alert.vencDays);
@@ -236,7 +241,8 @@ function buildReport(items, enums) {
 
       for (const [modelo, data] of modelGroups.entries()) {
         const dates = [...data.dates].join(", ");
-        text += `${modelo}    ${data.quantity}${data.quantity === 1 ? " unidade" : " unidades"} — ${dates}\n`;
+        const itemCodigo = [...data.items].filter(Boolean).join(", ");
+        text += `${itemCodigo ? itemCodigo + " " : ""}${modelo}    ${data.quantity}${data.quantity === 1 ? " unidade" : " unidades"} — ${dates}\n`;
       }
 
       text += `\n`;
