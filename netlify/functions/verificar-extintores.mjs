@@ -136,6 +136,21 @@ async function listAllItems() {
   return items;
 }
 
+function monthYearBR(value) {
+  const date = dateOnly(value);
+  if (!date) return "Período não informado";
+  return date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
+function monthKey(value) {
+  const date = dateOnly(value);
+  return date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}` : "9999-99";
+}
+
+function capitalizeMonth(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 function buildReport(items, enums) {
   const alerts = [];
 
@@ -144,29 +159,24 @@ function buildReport(items, enums) {
     const modeloId = String(rawValue(item[F.modelo]) || "");
     const filial = enums.filial.byId[filialId] || filialId || "Sem filial";
     const modelo = enums.modelo.byId[modeloId] || modeloId || "Modelo não informado";
-    const location = values(item[F.localizacao]).join(", ") || "não informado";
     const vencDays = daysUntil(item[F.vencimento]);
-    const hidroDays = daysUntil(item[F.hidro]);
 
-    if (isAttention(vencDays) || isAttention(hidroDays)) {
+    // Por enquanto, o alerta considera somente o vencimento.
+    if (isAttention(vencDays)) {
       alerts.push({
         id: item.id,
-        title: item.title || `Extintor #${item.id}`,
         filial,
         modelo,
-        location,
         vencimento: item[F.vencimento],
-        vencDays,
-        hidro: item[F.hidro],
-        hidroDays
+        vencDays
       });
     }
   }
 
   alerts.sort((a, b) => {
-    const ad = Math.min(a.vencDays ?? Infinity, a.hidroDays ?? Infinity);
-    const bd = Math.min(b.vencDays ?? Infinity, b.hidroDays ?? Infinity);
-    return ad - bd || String(a.filial).localeCompare(String(b.filial), "pt-BR");
+    const ad = a.vencDays ?? Infinity;
+    const bd = b.vencDays ?? Infinity;
+    return ad - bd || String(a.filial).localeCompare(String(b.filial), "pt-BR") || String(a.modelo).localeCompare(String(b.modelo), "pt-BR");
   });
 
   const checkedAt = new Date().toLocaleString("pt-BR", { timeZone: "America/Campo_Grande" });
@@ -174,23 +184,70 @@ function buildReport(items, enums) {
   if (!alerts.length) {
     return {
       count: 0,
-      html: `<p><b>Controle de Extintores</b></p><p>Nenhum extintor está vencido ou dentro dos próximos ${WARNING_DAYS} dias para vencimento/teste hidrostático.</p><p><small>Última verificação: ${escapeHtml(checkedAt)}</small></p>`
+      html: `Controle de Extintores\n\nNenhum extintor está vencido ou dentro dos próximos ${WARNING_DAYS} dias para vencimento.\n\nÚltima verificação: ${checkedAt}`
     };
   }
 
-  const rows = alerts.map(a => {
-    const venc = a.vencDays != null && a.vencDays <= WARNING_DAYS
-      ? `<b>${escapeHtml(dateBR(a.vencimento))}</b> — ${escapeHtml(statusLabel(a.vencDays))}`
-      : "fora da janela";
-    const hidro = a.hidroDays != null && a.hidroDays <= WARNING_DAYS
-      ? `<b>${escapeHtml(dateBR(a.hidro))}</b> — ${escapeHtml(statusLabel(a.hidroDays))}`
-      : "fora da janela";
-    const link = `https://sertao.bitrix24.com.br/page/uso_e_consumo/rtqioc/type/${ENTITY_TYPE_ID}/details/${a.id}/`;
-    return `<tr><td><a href="${link}">${escapeHtml(a.title)} #${escapeHtml(a.id)}</a></td><td>${escapeHtml(a.filial)}</td><td>${escapeHtml(a.modelo)}</td><td>${escapeHtml(a.location)}</td><td>${venc}</td><td>${hidro}</td></tr>`;
-  }).join("");
+  // Agrupa por mês de vencimento e, dentro do mês, por filial/modelo.
+  const monthGroups = new Map();
+  for (const alert of alerts) {
+    const mKey = monthKey(alert.vencimento);
+    if (!monthGroups.has(mKey)) {
+      monthGroups.set(mKey, {
+        label: capitalizeMonth(monthYearBR(alert.vencimento)),
+        items: []
+      });
+    }
+    monthGroups.get(mKey).items.push(alert);
+  }
 
-  const html = `<div><p><b>ATENÇÃO — Controle de Extintores</b></p><p>Foram encontrados <b>${alerts.length}</b> extintor(es) vencido(s) ou dentro dos próximos <b>${WARNING_DAYS} dias</b> para vencimento/teste hidrostático.</p><table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%"><thead><tr><th>Extintor</th><th>Filial</th><th>Modelo</th><th>Localização</th><th>Vencimento</th><th>Hidrostático</th></tr></thead><tbody>${rows}</tbody></table><p><small>Última verificação: ${escapeHtml(checkedAt)}</small></p></div>`;
-  return { count: alerts.length, html };
+  const sections = [];
+
+  for (const group of [...monthGroups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const month = group[1];
+    const filialGroups = new Map();
+
+    for (const alert of month.items) {
+      if (!filialGroups.has(alert.filial)) filialGroups.set(alert.filial, new Map());
+      const modelGroups = filialGroups.get(alert.filial);
+
+      if (!modelGroups.has(alert.modelo)) {
+        modelGroups.set(alert.modelo, {
+          quantity: 0,
+          dates: new Set(),
+          minDays: Infinity,
+          maxDays: -Infinity
+        });
+      }
+
+      const model = modelGroups.get(alert.modelo);
+      model.quantity += 1;
+      model.dates.add(dateBR(alert.vencimento));
+      if (alert.vencDays != null) {
+        model.minDays = Math.min(model.minDays, alert.vencDays);
+        model.maxDays = Math.max(model.maxDays, alert.vencDays);
+      }
+    }
+
+    let text = `Vencimentos para ${month.label}\n\n`;
+
+    for (const [filial, modelGroups] of filialGroups.entries()) {
+      text += `${filial}\n`;
+
+      for (const [modelo, data] of modelGroups.entries()) {
+        const dates = [...data.dates].join(", ");
+        text += `${modelo}    ${data.quantity}${data.quantity === 1 ? " unidade" : " unidades"} — ${dates}\n`;
+      }
+
+      text += `\n`;
+    }
+
+    sections.push(text.trim());
+  }
+
+  const reportText = `⚠️ ALERTA — CONTROLE DE EXTINTORES\n\nForam encontrados ${alerts.length} extintor(es) vencido(s) ou com vencimento nos próximos ${WARNING_DAYS} dias.\n\n${sections.join("\n\n")}\n\nÚltima verificação: ${checkedAt}`;
+
+  return { count: alerts.length, html: reportText };
 }
 
 export async function handler(event) {
@@ -204,19 +261,31 @@ export async function handler(event) {
     const items = await listAllItems();
     const report = buildReport(items, enums);
 
-    await bx("crm.item.update", {
+    // Só atualiza o card quando o conteúdo realmente mudou.
+    // Isso evita disparar o e-mail novamente todos os dias só porque a função rodou.
+    const currentItem = await bx("crm.item.get", {
       entityTypeId: ENTITY_TYPE_ID,
-      id: DISPARO_ITEM_ID,
-      fields: {
-        [INFO_FIELD]: report.html
-      }
+      id: DISPARO_ITEM_ID
     });
+    const currentReport = String(rawValue(currentItem?.[INFO_FIELD]) || "");
+    const changed = currentReport !== report.html;
+
+    if (changed) {
+      await bx("crm.item.update", {
+        entityTypeId: ENTITY_TYPE_ID,
+        id: DISPARO_ITEM_ID,
+        fields: {
+          [INFO_FIELD]: report.html
+        }
+      });
+    }
 
     return new Response(JSON.stringify({
       ok: true,
       checked: items.length,
       alerts: report.count,
-      itemId: DISPARO_ITEM_ID
+      itemId: DISPARO_ITEM_ID,
+      changed
     }), { status: 200, headers: { "content-type": "application/json; charset=utf-8" } });
   } catch (error) {
     console.error(error);
