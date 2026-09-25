@@ -182,12 +182,10 @@ function buildReport(items, enums) {
     return ad - bd || String(a.filial).localeCompare(String(b.filial), "pt-BR") || String(a.modelo).localeCompare(String(b.modelo), "pt-BR");
   });
 
-  const checkedAt = new Date().toLocaleString("pt-BR", { timeZone: "America/Campo_Grande" });
-
   if (!alerts.length) {
     return {
       count: 0,
-      html: `Controle de Extintores\n\nNenhum extintor está vencido ou dentro dos próximos ${WARNING_DAYS} dias para vencimento.\n\nÚltima verificação: ${checkedAt}`
+      html: `Controle de Extintores\n\nNenhum extintor está vencido ou dentro dos próximos ${WARNING_DAYS} dias para vencimento.`
     };
   }
 
@@ -251,7 +249,7 @@ function buildReport(items, enums) {
     sections.push(text.trim());
   }
 
-  const reportText = `⚠️ ALERTA — CONTROLE DE EXTINTORES\n\nForam encontrados ${alerts.length} extintor(es) vencido(s) ou com vencimento nos próximos ${WARNING_DAYS} dias.\n\n${sections.join("\n\n")}\n\nÚltima verificação: ${checkedAt}`;
+  const reportText = `⚠️ ALERTA — CONTROLE DE EXTINTORES\n\nForam encontrados ${alerts.length} extintor(es) vencido(s) ou com vencimento nos próximos ${WARNING_DAYS} dias.\n\n${sections.join("\n\n")}`;
 
   return { count: alerts.length, html: reportText };
 }
