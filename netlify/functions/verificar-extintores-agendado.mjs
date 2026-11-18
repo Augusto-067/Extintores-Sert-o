@@ -2,7 +2,7 @@ import { schedule } from "@netlify/functions";
 import { handler as verificar } from "./verificar-extintores.mjs";
 
 // 08:45 no horário UTC-4 = 12:45 UTC
-export const handler = schedule("55 14 * * *", async () => {
+export const handler = schedule("30 11 * * *", async () => {
   try {
     const response = await verificar();
     const body = await response.text();
